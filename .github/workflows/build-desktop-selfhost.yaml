@@ -1,0 +1,132 @@
+# Compila el cliente de escritorio de Fluxer para Windows x64 en los runners
+# de GitHub, sin necesidad de instalar Rust, MSVC ni Python en tu PC.
+#
+# Uso:
+#   1. Haz un fork de github.com/fluxerapp/fluxer a tu cuenta.
+#   2. Guarda este fichero en tu fork como:
+#        .github/workflows/build-desktop-selfhost.yaml
+#   3. Actions -> "build desktop (self-host)" -> Run workflow
+#      -> pon el commit SHA o tag que quieres compilar (el MISMO que corre tu
+#         instancia; si no coincide el cliente dara unsupported-bridge-version).
+#   4. Cuando acabe, descarga el artifact ZIP del resumen del run.
+#
+# El binario resultante no esta firmado: SmartScreen te avisara la primera vez.
+# Al ir sin empaquetar por Velopack, el updater se reporta como no soportado y
+# no te sobreescribira el build con el canary oficial.
+
+name: build desktop (self-host)
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Commit SHA, tag o rama a compilar
+        required: true
+        type: string
+      channel:
+        description: >-
+          Canal del build. Determina la carpeta de perfil: "stable" usa
+          %APPDATA%\fluxer, "canary" usa %APPDATA%\fluxercanary (la misma que
+          el Canary oficial que quizas tengas instalado).
+        required: false
+        type: choice
+        options:
+          - stable
+          - canary
+        default: stable
+
+jobs:
+  windows-x64:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      BUILD_CHANNEL: ${{ inputs.channel }}
+      RELEASE_CHANNEL: ${{ inputs.channel }}
+      PUBLIC_RELEASE_CHANNEL: ${{ inputs.channel }}
+      PUBLIC_BUILD_VERSION: selfhost-${{ inputs.ref }}
+      BUILD_VERSION: selfhost-${{ inputs.ref }}
+      # La captura de juegos (win-game-capture) queda fuera a proposito: es
+      # opcional, no hace falta para arrancar, y es la que mas suele romper el
+      # build. Para incluirla, pon las dos a 'windows-game-capture' / 'true'.
+      FLUXER_DESKTOP_BUILD_VARIANT: default
+      FLUXER_WINDOWS_GAME_CAPTURE_MODULE_ENABLED: "false"
+
+    steps:
+      - name: Permitir rutas largas en git
+        run: git config --global core.longpaths true
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: pnpm via corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.29.3 --activate
+
+      # node-gyp lo necesita para algunos addons nativos.
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Los addons nativos son napi-rs: sin cargo no hay puente de voz.
+      - name: Rust 1.93.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+          targets: x86_64-pc-windows-msvc
+
+      - name: Entorno MSVC
+        uses: TheMrMilchmann/setup-msvc-dev@v3
+        with:
+          arch: amd64
+
+      - name: Instalar dependencias del monorepo
+        run: pnpm install --frozen-lockfile
+
+      # Compila addons nativos + proceso main + preload (scripts/build.mjs).
+      - name: Build del cliente
+        working-directory: fluxer_desktop
+        run: pnpm build
+
+      # --dir = carpeta desempaquetada, sin instalador ni Velopack.
+      - name: Empaquetar sin instalador
+        working-directory: fluxer_desktop
+        run: pnpm exec electron-builder --dir --config electron-builder.config.cjs --win --x64
+
+      - name: Comprobar que el binario existe
+        working-directory: fluxer_desktop
+        shell: pwsh
+        run: |
+          if (-not (Test-Path dist-electron/win-unpacked)) {
+            Get-ChildItem dist-electron -Recurse -Depth 2 | Select-Object FullName
+            throw "No se genero dist-electron/win-unpacked"
+          }
+          Get-ChildItem dist-electron/win-unpacked | Select-Object Name, Length
+
+      - name: Subir artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: fluxer-desktop-${{ inputs.channel }}-win-x64
+          path: fluxer_desktop/dist-electron/win-unpacked
+          retention-days: 14
+
+      # Si algo falla, esto te deja los logs de compilacion nativa a mano.
+      - name: Logs de build (si falla)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: |
+            fluxer_desktop/dist-electron
+            fluxer_desktop/native/**/target/**/*.log
+          retention-days: 7
+          if-no-files-found: ignore
