@@ -59,8 +59,13 @@ const VOICE_POPOUT_TRAFFIC_LIGHT_POSITION = {
 	x: 12,
 	y: Math.round((VOICE_POPOUT_TITLEBAR_HEIGHT_MAC - VOICE_POPOUT_TRAFFIC_LIGHT_DIAMETER) / 2),
 };
+const extraTrustedOrigins = (process.env.FLUXER_EXTRA_TRUSTED_ORIGINS ?? 'https://auth.novastra.xyz')
+	.split(',')
+	.map((value) => value.trim())
+	.filter(Boolean);
+
 const trustedWebOrigins = new Set(
-	[STABLE_APP_URL, CANARY_APP_URL]
+	[STABLE_APP_URL, CANARY_APP_URL, ...extraTrustedOrigins]
 		.map((url) => {
 			try {
 				return new URL(url).origin;
