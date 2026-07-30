@@ -65,9 +65,16 @@ jobs:
 
       # Si esto falla, es que upstream ha tocado las lineas que parcheas.
       # Es el unico momento en que tienes que intervenir a mano.
+      - name: Normalizar el parche a finales de linea Unix
+        shell: pwsh
+        run: |
+          $p = "overlay/patches/selfhost.patch"
+          $t = [System.IO.File]::ReadAllText($p) -replace "`r`n", "`n"
+          [System.IO.File]::WriteAllText($p, $t)
+
       - name: Aplicar parches
         working-directory: source
-        run: git apply --3way --verbose ../overlay/patches/selfhost.patch
+        run: git apply --3way --ignore-whitespace --verbose ../overlay/patches/selfhost.patch
 
       - name: Node 24
         uses: actions/setup-node@v4
