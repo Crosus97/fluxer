@@ -54,8 +54,10 @@ jobs:
       FLUXER_WINDOWS_GAME_CAPTURE_MODULE_ENABLED: "false"
 
     steps:
-      - name: Permitir rutas largas en git
-        run: git config --global core.longpaths true
+      - name: Configurar git (rutas largas y finales de linea)
+        run: |
+          git config --global core.longpaths true
+          git config --global core.autocrlf false
 
       # Tu fork: solo aporta el fichero de parches.
       - name: Checkout de tu fork (parches)
